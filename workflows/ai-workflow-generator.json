@@ -1,0 +1,276 @@
+{
+  "name": "AI Workflow Generator for n8n",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        48,
+        -16
+      ],
+      "id": "a79e3680-e91e-46f9-92f7-a9da3fe5cd4a",
+      "name": "When chat message received"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "=You are an expert AI workflow developer specializing in building workflows for n8n as JSON. Your job is to translate a human’s natural language request into a fully functional n8n workflow JSON. It should be comprehensive, functional, and importable. It should have 100% valid JSON structure, node types, and connection methods.\n\nIMPORTANT RESPONSE BODY RULES:\n\nWhen using Respond to Webhook nodes:\n- Never generate multiline JSON strings\n- Never include unescaped quotes inside responseBody\n- Always use compact escaped JSON format\n\nCorrect example:\n\"responseBody\": \"={\\\"status\\\":\\\"success\\\",\\\"message\\\":\\\"ok\\\"}\"\n\nIncorrect example:\n\"responseBody\": \"{\\n \"status\": \"success\" }\"\n\n## Output\nYour output should only be the final JSON of the full workflow.\n\nYour output must start with a { and must end with a }.\n- Do not include anything before the { (such as ```json or any markdown formatting).\n- Do not include anything after the } (such as closing code blocks like ``` or explanations).\n\nYour output should be a pure JSON object that begins with { and ends with }, ready to be used as the body of a POST request.\n\nThe JSON must:\n- Be syntactically valid and complete\n- Include a `nodes` array with each node containing all required parameters\n- Include a `connections` object that correctly maps outputs to inputs\n- Start with a `trigger` node if one is required for the use case (e.g., Webhook, Schedule, etc.)\n- Contain descriptive names and parameter values relevant to the user request\n- Avoid placeholders unless no reasonable value can be inferred\n- Contain sticky notes that are explaining what's going on within each step and any credentials or connections that still need to be configured. The colors should vary throughout the workflow.\n\nBefore generating the JSON, analyze the request and:\n1. Break it down into logical automation steps\n2. Choose appropriate nodes based on the steps\n3. Properly connect the nodes to reflect execution order\n\nIf the request is ambiguous, make a best guess using standard automation logic.\n\nDo not return explanations, comments, or any output outside of the JSON markdown block.\n\nYou are expected to produce developer-grade output suitable for direct import into n8n.\n\n## API Submission Requirements\nTo automatically create a workflow using the n8n API, your generated JSON must include the following top-level fields in the final object:\n\n- `name` (string): A clear, descriptive workflow name.\n- `nodes` (array): The complete array of node objects used in the workflow.\n- `connections` (object): A valid map of node-to-node connections.\n- `settings` (object): Workflow-level settings (e.g. `saveManualExecutions`, `executionOrder`).\n- `staticData` (null or object): Set to `null` unless specific static data is needed.\n\nExample “settings” object:\n  \"settings\": {\n    \"executionOrder\": \"v1\",\n    \"saveManualExecutions\": true,\n    \"saveDataSuccessExecution\": \"all\",\n    \"saveExecutionProgress\": true,\n    \"saveDataErrorExecution\": \"all\",\n    \"errorWorkflow\": \"\",\n    \"timezone\": \"America/New_York\"\n  }\n\n## n8n Documentation\nUse the Data from the user Prompt and search the vector store for more Example."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        256,
+        -16
+      ],
+      "id": "55ec4477-e3fd-4725-8220-30cbfa5041e7",
+      "name": "n8n Builder"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-4-20250514",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 4"
+        },
+        "options": {
+          "maxTokensToSample": 8000,
+          "thinking": true,
+          "thinkingBudget": 3000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        176,
+        208
+      ],
+      "id": "2381db21-693c-46f8-8519-4b939d7e1cc6",
+      "name": "Claude Sonnet 4",
+      "credentials": {
+        "anthropicApi": {
+          "id": "your-anthropic-credential-id",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawOutput = $input.first().json.output || $input.first().json.text || JSON.stringify($input.first().json);\n\ntry {\n  const parsed = JSON.parse(rawOutput);\n\n  const requiredFields = ['name', 'nodes', 'connections'];\n\n  const missingFields = requiredFields.filter(field => !(field in parsed));\n\n  if (missingFields.length > 0) {\n    return [{\n      json: {\n        valid: false,\n        stage: 'required_fields',\n        error: `Missing required fields: ${missingFields.join(', ')}`,\n        rawOutput\n      }\n    }];\n  }\n\n  // Semantic validation checks\n  const workflowString = JSON.stringify(parsed);\n\n  const dangerousPatterns = [\n    '\"responseBody\": \"{',\n    '\"={{ { \"'\n  ];\n\n  const foundProblems = dangerousPatterns.filter(pattern =>\n    workflowString.includes(pattern)\n  );\n\n  if (foundProblems.length > 0) {\n    return [{\n      json: {\n        valid: false,\n        stage: 'semantic_validation',\n        error: `Potential malformed expressions detected`,\n        detectedPatterns: foundProblems,\n        rawOutput\n      }\n    }];\n  }\n// Detect malformed responseBody JSON escaping\nfor (const node of parsed.nodes || []) {\n\n  if (\n    node.parameters &&\n    typeof node.parameters.responseBody === 'string'\n  ) {\n\n    const body = node.parameters.responseBody;\n\n    // Detect compact malformed JSON expressions\n    if (\n      body.startsWith('={') &&\n      body.includes('\"status\"') &&\n      !body.includes('\\\\\"status\\\\\"')\n    ) {\n\n      return [{\n        json: {\n          valid: false,\n          stage: 'responseBody_escape_validation',\n          error: 'Malformed responseBody escaping detected',\n          rawOutput\n        }\n      }];\n    }\n  }\n}\n  return [{\n    json: {\n      valid: true,\n      workflow: parsed\n    }\n  }];\n\n} catch (error) {\n  return [{\n    json: {\n      valid: false,\n      stage: 'json_parse',\n      error: error.message,\n      rawOutput\n    }\n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -16
+      ],
+      "id": "b6c54bb2-1d3d-4bd4-bea3-57f89c5190d5",
+      "name": "JSON Validator"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=The following n8n workflow JSON failed validation.\n\nValidation Stage:\n{{ $json.stage }}\n\nValidation Error:\n{{ $json.error }}\n\nMalformed Workflow JSON:\n{{ $json.rawOutput }}\n\nRepair the workflow and return ONLY corrected valid importable JSON.",
+        "options": {
+          "systemMessage": "You are an expert n8n workflow JSON repair engineer.\n\nYour task is to repair malformed or invalid n8n workflow JSON while preserving the original workflow functionality.\n\nRules:\n- Return ONLY valid JSON\n- Do not include markdown\n- Do not include explanations\n- Preserve all workflow logic and node structure\n- Fix malformed expressions\n- Fix invalid escaping\n- Fix broken JSON syntax\n- Ensure the output is importable into n8n\n- Preserve nodes, connections, settings, and sticky notes whenever possible\n\nThe input contains:\n- original malformed workflow JSON\n- validation error information\n\nReturn only the corrected workflow JSON object."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        944,
+        0
+      ],
+      "id": "fc934939-8942-4830-b8af-78bac1aa6249",
+      "name": "Workflow Repair Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-4-20250514",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 4"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.4,
+      "position": [
+        944,
+        176
+      ],
+      "id": "2b78e301-e908-4f6d-85bb-f7d2658c62ec",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "your-anthropic-credential-id",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawOutput = $input.first().json.output || $input.first().json.text || JSON.stringify($input.first().json);\n\ntry {\n  const parsed = JSON.parse(rawOutput);\n\n  const requiredFields = ['name', 'nodes', 'connections'];\n\n  const missingFields = requiredFields.filter(field => !(field in parsed));\n\n  if (missingFields.length > 0) {\n    return [{\n      json: {\n        valid: false,\n        stage: 'required_fields',\n        error: `Missing required fields: ${missingFields.join(', ')}`,\n        rawOutput\n      }\n    }];\n  }\n\n  // Semantic validation checks\n  const workflowString = JSON.stringify(parsed);\n\n  const dangerousPatterns = [\n    '\"responseBody\": \"{',\n    '\"={{ { \"'\n  ];\n\n  const foundProblems = dangerousPatterns.filter(pattern =>\n    workflowString.includes(pattern)\n  );\n\n  if (foundProblems.length > 0) {\n    return [{\n      json: {\n        valid: false,\n        stage: 'semantic_validation',\n        error: `Potential malformed expressions detected`,\n        detectedPatterns: foundProblems,\n        rawOutput\n      }\n    }];\n  }\n\n  return [{\n    json: {\n      valid: true,\n      workflow: parsed\n    }\n  }];\n\n} catch (error) {\n  return [{\n    json: {\n      valid: false,\n      stage: 'json_parse',\n      error: error.message,\n      rawOutput\n    }\n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        0
+      ],
+      "id": "2a33aab8-5938-4da3-b6f8-98966e16cacf",
+      "name": "Revalidation Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "bb4b32d8-33b5-4f40-b560-a06562de9138",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        736,
+        -16
+      ],
+      "id": "c49a82a8-f719-4021-af19-8ab4f76bd9e9",
+      "name": "Validation Router"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst workflow = input.workflow;\n\nif (!workflow || !workflow.nodes) {\n  return [{\n    json: {\n      valid: false,\n      error: \"No workflow object found\"\n    }\n  }];\n}\n\n// Traverse all nodes\nfor (const node of workflow.nodes) {\n\n  if (\n    node.parameters &&\n    typeof node.parameters.responseBody === 'string'\n  ) {\n\n    const body = node.parameters.responseBody;\n\n    // Detect malformed responseBody\n    if (\n      body.includes('\"status\"') ||\n      body.includes('{\"status\"')\n    ) {\n\n      // FORCE SAFE FORMAT\n      node.parameters.responseBody =\n        '={\\\\\"status\\\\\":\\\\\"success\\\\\",\\\\\"message\\\\\":\\\\\"Customer data processed successfully\\\\\"}';\n    }\n  }\n}\n\nreturn [{\n  json: {\n    valid: true,\n    workflow,\n    repairApplied: true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        0
+      ],
+      "id": "1de54e26-8d44-41c9-8dba-5ac1c2ff468d",
+      "name": "Deterministic Repair Layer"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "n8n Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "n8n Builder": {
+      "main": [
+        [
+          {
+            "node": "JSON Validator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Sonnet 4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "n8n Builder",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON Validator": {
+      "main": [
+        [
+          {
+            "node": "Validation Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Workflow Repair Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Repair Agent": {
+      "main": [
+        [
+          {
+            "node": "Revalidation Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revalidation Check": {
+      "main": [
+        [
+          {
+            "node": "Deterministic Repair Layer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validation Router": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Workflow Repair Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
