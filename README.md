@@ -170,14 +170,7 @@ AI-Workflow-Generator-for-n8n/
 │   ├── repair-pipeline.png
 │   ├── successful-generated-workflow.png
 │   └── ingestion-pipeline.png
-│
-├── docs/
-│   ├── architecture.md
-│   ├── validation-flow.md
-│   └── repair-strategy.md
-│
-└── examples/
-    └── customer-webhook-payload.json
+
 ```
 
 ---
